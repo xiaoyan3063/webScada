@@ -118,7 +118,26 @@
                 @mousedown.stop="handleItemMouseDown($event, item)"
                 :class="{ 'selected': selectedItems.includes(item.id) }"
               />
-              
+              <!-- 线条起点控制点 -->
+                <circle 
+                  v-if="selectedItems.includes(item.id) && item.type === 'line'"
+                  class="resize-handle line-handle"
+                  :cx="item.x1"
+                  :cy="item.y1"
+                  r="4"
+                  fill="#0078d7"
+                  @mousedown.stop="handleResizeMouseDown($event, item, 'line-start')"
+                />
+                <!-- 线条终点控制点 -->
+                <circle 
+                  v-if="selectedItems.includes(item.id) && item.type === 'line'"
+                  class="resize-handle line-handle"
+                  :cx="item.x2"
+                  :cy="item.y2"
+                  r="4"
+                  fill="#0078d7"
+                  @mousedown.stop="handleResizeMouseDown($event, item, 'line-end')"
+                />
               <text 
                 v-if="item.type === 'text'"
                 :x="item.x"
@@ -142,6 +161,16 @@
                 :href="item.src"
                 @mousedown.stop="handleItemMouseDown($event, item)"
                 :class="{ 'selected': selectedItems.includes(item.id) }"
+              />
+              <rect 
+                v-if="selectedItems.includes(item.id) && item.type === 'image'"
+                class="resize-handle"
+                :x="item.x + item.width - 4"
+                :y="item.y + item.height - 4"
+                width="8"
+                height="8"
+                fill="#0078d7"
+                @mousedown.stop="handleResizeMouseDown($event, item, 'bottom-right')"
               />
             </g>
           </svg>
@@ -616,7 +645,15 @@
             dy = mouseY - item.cy;
             item.r = Math.max(5, Math.sqrt(dx * dx + dy * dy));
             break;
+          case 'line-start':
+            item.x1 = mouseX;
+            item.y1 = mouseY;
+            break;
             
+          case 'line-end':
+            item.x2 = mouseX;
+            item.y2 = mouseY;
+            break;
           // 可以添加其他调整类型的处理
         }
         
