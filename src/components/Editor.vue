@@ -71,6 +71,17 @@
                 @mousedown.stop="handleItemMouseDown($event, item)"
                 :class="{ 'selected': selectedItems.includes(item.id) }"
               />
+              <!-- 添加调整大小的控制点 -->
+              <rect 
+                v-if="selectedItems.includes(item.id) && item.type === 'rectangle'"
+                class="resize-handle"
+                :x="item.x + item.width - 4"
+                :y="item.y + item.height - 4"
+                width="8"
+                height="8"
+                fill="#0078d7"
+                @mousedown.stop="handleResizeMouseDown($event, item, 'bottom-right')"
+              />
               
               <circle 
                 v-if="item.type === 'circle'"
@@ -83,6 +94,16 @@
                 :opacity="item.opacity"
                 @mousedown.stop="handleItemMouseDown($event, item)"
                 :class="{ 'selected': selectedItems.includes(item.id) }"
+              />
+              <!-- 圆形调整大小的控制点 -->
+              <circle 
+                v-if="selectedItems.includes(item.id) && item.type === 'circle'"
+                class="resize-handle"
+                :cx="item.cx + item.r * Math.cos(Math.PI/4)"
+                :cy="item.cy + item.r * Math.sin(Math.PI/4)"
+                r="4"
+                fill="#0078d7"
+                @mousedown.stop="handleResizeMouseDown($event, item, 'radius')"
               />
               
               <line 
@@ -183,6 +204,10 @@
           startY: 0,
           items: []  // 保存拖拽开始时选中项的状态
         },
+        isResizing: false,
+        resizeItem: null,
+        resizeType: null, // 'bottom-right', 'radius' 等
+        initialItemState1: null,
       }
     },
     computed: {
@@ -555,92 +580,65 @@
           return i;
         });
       },
-      // 调整项目大小
-      resizeItem(item, x, y) {
-        this.items = this.items.map(i => {
-          if (i.id !== item.id) return i;
-          
-          // 在switch外部声明所有可能用到的变量
-          let newItem = { ...i };
-          let newWidth, newHeight, dx, dy, distance;
-          
-          switch (i.type) {
-            case 'rectangle':
-              newWidth = Math.max(10, x - i.x);
-              newHeight = Math.max(10, y - i.y);
-              newItem.width = newWidth;
-              newItem.height = newHeight;
-              break;
-              
-            case 'circle':
-              dx = x - i.cx;
-              dy = y - i.cy;
-              distance = Math.sqrt(dx * dx + dy * dy);
-              newItem.r = Math.max(5, distance);
-              break;
-              
-            case 'line':
-              if (this.resizeHandle === 'start') {
-                newItem.x1 = x;
-                newItem.y1 = y;
-              } else {
-                newItem.x2 = x;
-                newItem.y2 = y;
-              }
-              break;
-              
-            case 'image':
-            case 'text':
-              newWidth = Math.max(10, x - i.x);
-              newHeight = Math.max(10, y - i.y);
-              newItem.width = newWidth;
-              newItem.height = newHeight;
-              break;
-          }
-          
-          return newItem;
-        });
+      // 添加调整大小的事件处理
+      handleResizeMouseDown(event, item, resizeType) {
+        if (this.mode !== 'edit') return;
+        
+        event.stopPropagation();
+        this.isResizing = true;
+        this.resizeItem = item;
+        this.resizeType = resizeType;
+        this.initialItemState1 = JSON.parse(JSON.stringify(item));
+        
+        // 添加全局事件监听
+        window.addEventListener('mousemove', this.handleResizeMouseMove);
+        window.addEventListener('mouseup', this.handleResizeMouseUp);
       },
       
-      // 检查是否点击了调整大小的控制点
-      checkResizeHandle(item, x, y) {
-        if (!item) return false;
-  
-        const threshold = 8;
-        let dx, dy, distance, startDist, endDist;
+      handleResizeMouseMove(event) {
+        if (!this.isResizing || !this.resizeItem) return;
         
-        switch (item.type) {
-          case 'rectangle':
-            return (
-              x >= item.x + item.width - threshold && 
-              x <= item.x + item.width + threshold &&
-              y >= item.y + item.height - threshold && 
-              y <= item.y + item.height + threshold
-            );
+        const rect = this.$refs.canvasContainer.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+        
+        const item = this.resizeItem;
+        const initial = this.initialItemState1;
+        let dx,dy;
+        switch (this.resizeType) {
+          case 'bottom-right': // 矩形右下角调整
+            item.width = Math.max(10, mouseX - initial.x);
+            item.height = Math.max(10, mouseY - initial.y);
+            break;
             
-          case 'circle':
-            dx = x - item.cx;
-            dy = y - item.cy;
-            distance = Math.sqrt(dx * dx + dy * dy);
-            return Math.abs(distance - item.r) < threshold;
+          case 'radius': // 圆形半径调整
+            dx = mouseX - item.cx;
+            dy = mouseY - item.cy;
+            item.r = Math.max(5, Math.sqrt(dx * dx + dy * dy));
+            break;
             
-          case 'line':
-            startDist = Math.sqrt(Math.pow(x - item.x1, 2) + Math.pow(y - item.y1, 2));
-            endDist = Math.sqrt(Math.pow(x - item.x2, 2) + Math.pow(y - item.y2, 2));
-            
-            if (startDist < threshold) {
-              this.resizeHandle = 'start';
-              return true;
-            } else if (endDist < threshold) {
-              this.resizeHandle = 'end';
-              return true;
-            }
-            return false;
-            
-          default:
-            return false;
+          // 可以添加其他调整类型的处理
         }
+        
+        // 更新视图
+        this.items = [...this.items];
       },
+      
+      handleResizeMouseUp() {
+        if (this.isResizing) {
+          this.history.push(JSON.parse(JSON.stringify(this.items)));
+        }
+        
+        this.isResizing = false;
+        this.resizeItem = null;
+        this.resizeType = null;
+        this.initialItemState1 = null;
+        
+        // 移除事件监听
+        window.removeEventListener('mousemove', this.handleResizeMouseMove);
+        window.removeEventListener('mouseup', this.handleResizeMouseUp);
+      },
+      
       handleCanvasMouseUp() {
         if (this.isSelecting) {
           this.finalizeSelection();
@@ -701,7 +699,7 @@
       // 项目鼠标事件
       handleItemMouseDown(event, item) {
         console.log('MouseDown Event:', event.target, 'on item:', item.id);
-        if (this.mode !== 'edit') return;
+        if (this.mode !== 'edit' || this.isResizing) return;
 
         const rect = this.$refs.canvasContainer.getBoundingClientRect();
         const mouseX = event.clientX - rect.left;
@@ -926,7 +924,7 @@
     transition: none !important; /* 拖拽时禁用动画 */
     cursor: move;
   }
-  .selected::after {
+  /* .selected::after {
     content: '';
     position: absolute;
     width: 8px;
@@ -935,7 +933,7 @@
     right: -4px;
     bottom: -4px;
     cursor: nwse-resize;
-  }
+  } */
   /* 添加拖拽相关样式 */
   .dragging {
     cursor: grabbing !important;
@@ -947,5 +945,9 @@
 
   .canvas-container {
     user-select: none; /* 防止文本选中干扰拖拽 */
+  }
+  .resize-handle {
+    cursor: nwse-resize;
+    pointer-events: all;
   }
   </style>
