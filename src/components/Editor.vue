@@ -11,6 +11,7 @@
         @invert-selection="invertSelection"
         @save="saveCanvas"
         @load="loadCanvas"
+        @add-image="addImage"
       />
       
       <div class="editor-content">
@@ -30,7 +31,7 @@
           @mousemove="handleCanvasMouseMove"
           @mouseup="handleCanvasMouseUp"
         >
-          <svg class="canvas" :width="canvasWidth" :height="canvasHeight">
+          <svg class="canvas" :width="canvasWidth" :height="canvasHeight" pointer-events="bounding-box">
             <!-- 网格背景 -->
             <pattern 
               id="grid" 
@@ -126,11 +127,10 @@
         </div>
         
         <PropertyPanel 
-          v-if="mode === 'edit' && selectedItems.length > 0"
-          :items="items"
-          :selected-items="selectedItems"
+          v-if="mode === 'edit' && selectedItem"
+          :item="selectedItem"
           :variables="variables"
-          @update-item="updateItem"
+          @update-item="updateSingleItem"
           @bind-variable="bindVariable"
         />
       </div>
@@ -167,11 +167,32 @@
         currentMousePos: { x: 0, y: 0 },
         history: new History(),
         animationFrame: null,
-        lastUpdateTime: 0
+        lastUpdateTime: 0,
+        initialItemState: [], // 用于存储拖动前的状态
+        resizeHandle: null, // 记录调整大小的控制点
+        isManualDragging: false,
+        pendingUpdates: new Map(), // 用于暂存未提交的修改
+        updateLock: false,
+        isUpdating: false,          // 防止更新循环
+        lastDragPosition: null,     // 记录最后有效拖拽位置
+        validSelection: null,       // 有效选中状态
+        animationEnabled: false, // 默认禁用动画
+        dragState: {
+          active: false,
+          startX: 0,
+          startY: 0,
+          items: []  // 保存拖拽开始时选中项的状态
+        },
       }
     },
-    
-    created() {
+    computed: {
+      selectedItem() {
+        return this.selectedItems.length === 1 
+          ? this.items.find(item => item.id === this.selectedItems[0])
+          : null;
+      }
+    },
+    created() {      
       // 初始化一些示例变量
       this.variables = [
         { id: 'var1', name: '温度', value: 25, min: 0, max: 100 },
@@ -180,20 +201,27 @@
       ]
       
       // 启动动画循环
-      this.animationLoop()
+      this.controlledAnimationLoop();
+  
+      // 初始化拖拽状态
+      this.dragState = null;
     },
     
     beforeDestroy() {
       if (this.animationFrame) {
         cancelAnimationFrame(this.animationFrame)
       }
+      // 确保移除所有事件监听
+      window.removeEventListener('mousemove', this.handleRealDragMove);
+      window.removeEventListener('mouseup', this.handleRealDragEnd);
     },
     
     methods: {
       // 模式切换
       changeMode(mode) {
-        this.mode = mode
-        this.selectedItems = [] // 切换到运行模式时清空选择
+        this.mode = mode;
+        this.animationEnabled = mode === 'run'; // 仅运行模式启用动画
+        this.selectedItems = [];
       },
       
       // 添加形状
@@ -270,15 +298,15 @@
       
       // 选择项目
       selectItem(id, isMultiSelect = false) {
-        if (this.mode !== 'edit') return
-        
+        if (this.mode !== 'edit') return;
+  
         if (!isMultiSelect || !event.ctrlKey) {
-          this.selectedItems = [id]
+          this.selectedItems = [id];
         } else if (!this.selectedItems.includes(id)) {
-          this.selectedItems.push(id)
+          this.selectedItems = [...this.selectedItems, id]; // 使用扩展运算符创建新数组
         } else {
-          this.selectedItems = this.selectedItems.filter(itemId => itemId !== id)
-        }
+          this.selectedItems = this.selectedItems.filter(itemId => itemId !== id);
+        }        
       },
       
       // 删除选中项
@@ -433,127 +461,334 @@
       
       // 画布鼠标事件
       handleCanvasMouseDown(event) {
-        if (this.mode !== 'edit') return
+        if (this.mode !== 'edit') return;
+
+        const rect = this.$refs.canvasContainer.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
         
-        const rect = this.$refs.canvasContainer.getBoundingClientRect()
-        const x = event.clientX - rect.left
-        const y = event.clientY - rect.top
+        this.currentMousePos = { x, y };
         
-        this.currentMousePos = { x, y }
-        
-        // 如果没有点击到任何项目，开始框选
-        if (event.target.tagName === 'svg' || event.target.tagName === 'rect' && event.target.getAttribute('fill') === 'url(#grid)') {
-          this.isSelecting = true
-          this.selectionStart = { x, y }
-          if (!event.ctrlKey) {
-            this.selectedItems = []
+        // 检查是否点击了空白区域
+        if (event.target.tagName === 'svg' || 
+            (event.target.tagName === 'rect' && event.target.getAttribute('fill') === 'url(#grid)')) {
+          this.isSelecting = true;
+          this.selectionStart = { x, y };
+          if (!event.ctrlKey && !event.metaKey) {
+            this.selectedItems = [];
           }
         }
       },
       
       handleCanvasMouseMove(event) {
-        const rect = this.$refs.canvasContainer.getBoundingClientRect()
-        const x = event.clientX - rect.left
-        const y = event.clientY - rect.top
+        const rect = this.$refs.canvasContainer.getBoundingClientRect();
+        this.currentMousePos = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top
+        };
         
-        this.currentMousePos = { x, y }
+        if (this.isSelecting) return;
+        if (!this.isDragging || this.selectedItems.length === 0) return;
+
+        event.preventDefault();
         
-        if (this.isDragging && this.selectedItems.length > 0) {
-          const dx = x - this.dragStartPos.x
-          const dy = y - this.dragStartPos.y
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        
+        const dx = x - this.dragStartPos.x;
+        const dy = y - this.dragStartPos.y;
+
+        // 移动所有选中的项目
+        this.items = this.items.map(item => {
+          if (!this.selectedItems.includes(item.id)) return item;
           
-          this.items = this.items.map(item => {
-            if (this.selectedItems.includes(item.id)) {
-              if (item.type === 'circle') {
-                return { ...item, cx: item.cx + dx, cy: item.cy + dy }
-              } else if (item.type === 'line') {
-                return { 
-                  ...item, 
-                  x1: item.x1 + dx, 
-                  y1: item.y1 + dy,
-                  x2: item.x2 + dx,
-                  y2: item.y2 + dy
-                }
-              } else {
-                return { ...item, x: item.x + dx, y: item.y + dy }
-              }
+          const newItem = {...item};
+          const initialItem = this.initialItemState.find(i => i.id === item.id);
+          
+          if (this.isResizing) {
+            this.resizeItem(newItem, x, y);
+          } else {
+            switch(item.type) {
+              case 'circle':
+                newItem.cx = initialItem.cx + dx;
+                newItem.cy = initialItem.cy + dy;
+                break;
+              case 'line':
+                newItem.x1 = initialItem.x1 + dx;
+                newItem.y1 = initialItem.y1 + dy;
+                newItem.x2 = initialItem.x2 + dx;
+                newItem.y2 = initialItem.y2 + dy;
+                break;
+              default:
+                newItem.x = initialItem.x + dx;
+                newItem.y = initialItem.y + dy;
             }
-            return item
-          })
+          }
           
-          this.dragStartPos = { x, y }
-        }
+          return newItem;
+        });
+        
+        this.dragStartPos = { x, y };
+      },
+      // 移动项目
+      moveItem(item, dx, dy) {
+        this.items = this.items.map(i => {
+          if (i.id === item.id) {
+            if (i.type === 'circle') {
+              return { ...i, cx: this.initialItemState.cx + dx, cy: this.initialItemState.cy + dy };
+            } else if (i.type === 'line') {
+              return {
+                ...i,
+                x1: this.initialItemState.x1 + dx,
+                y1: this.initialItemState.y1 + dy,
+                x2: this.initialItemState.x2 + dx,
+                y2: this.initialItemState.y2 + dy
+              };
+            } else {
+              return {
+                ...i,
+                x: this.initialItemState.x + dx,
+                y: this.initialItemState.y + dy
+              };
+            }
+          }
+          return i;
+        });
+      },
+      // 调整项目大小
+      resizeItem(item, x, y) {
+        this.items = this.items.map(i => {
+          if (i.id !== item.id) return i;
+          
+          // 在switch外部声明所有可能用到的变量
+          let newItem = { ...i };
+          let newWidth, newHeight, dx, dy, distance;
+          
+          switch (i.type) {
+            case 'rectangle':
+              newWidth = Math.max(10, x - i.x);
+              newHeight = Math.max(10, y - i.y);
+              newItem.width = newWidth;
+              newItem.height = newHeight;
+              break;
+              
+            case 'circle':
+              dx = x - i.cx;
+              dy = y - i.cy;
+              distance = Math.sqrt(dx * dx + dy * dy);
+              newItem.r = Math.max(5, distance);
+              break;
+              
+            case 'line':
+              if (this.resizeHandle === 'start') {
+                newItem.x1 = x;
+                newItem.y1 = y;
+              } else {
+                newItem.x2 = x;
+                newItem.y2 = y;
+              }
+              break;
+              
+            case 'image':
+            case 'text':
+              newWidth = Math.max(10, x - i.x);
+              newHeight = Math.max(10, y - i.y);
+              newItem.width = newWidth;
+              newItem.height = newHeight;
+              break;
+          }
+          
+          return newItem;
+        });
       },
       
+      // 检查是否点击了调整大小的控制点
+      checkResizeHandle(item, x, y) {
+        if (!item) return false;
+  
+        const threshold = 8;
+        let dx, dy, distance, startDist, endDist;
+        
+        switch (item.type) {
+          case 'rectangle':
+            return (
+              x >= item.x + item.width - threshold && 
+              x <= item.x + item.width + threshold &&
+              y >= item.y + item.height - threshold && 
+              y <= item.y + item.height + threshold
+            );
+            
+          case 'circle':
+            dx = x - item.cx;
+            dy = y - item.cy;
+            distance = Math.sqrt(dx * dx + dy * dy);
+            return Math.abs(distance - item.r) < threshold;
+            
+          case 'line':
+            startDist = Math.sqrt(Math.pow(x - item.x1, 2) + Math.pow(y - item.y1, 2));
+            endDist = Math.sqrt(Math.pow(x - item.x2, 2) + Math.pow(y - item.y2, 2));
+            
+            if (startDist < threshold) {
+              this.resizeHandle = 'start';
+              return true;
+            } else if (endDist < threshold) {
+              this.resizeHandle = 'end';
+              return true;
+            }
+            return false;
+            
+          default:
+            return false;
+        }
+      },
       handleCanvasMouseUp() {
         if (this.isSelecting) {
-          // 框选结束，选择框内的项目
-          const minX = Math.min(this.selectionStart.x, this.currentMousePos.x)
-          const maxX = Math.max(this.selectionStart.x, this.currentMousePos.x)
-          const minY = Math.min(this.selectionStart.y, this.currentMousePos.y)
-          const maxY = Math.max(this.selectionStart.y, this.currentMousePos.y)
-          
-          this.items.forEach(item => {
-            let isInside = false
-            
-            if (item.type === 'rectangle') {
-              isInside = item.x < maxX && 
-                        item.x + item.width > minX && 
-                        item.y < maxY && 
-                        item.y + item.height > minY
-            } else if (item.type === 'circle') {
-              // 简化的圆选择检测
-              isInside = item.cx > minX && 
-                        item.cx < maxX && 
-                        item.cy > minY && 
-                        item.cy < maxY
-            } else if (item.type === 'line') {
-              // 简化的线选择检测
-              isInside = (item.x1 > minX && item.x1 < maxX && item.y1 > minY && item.y1 < maxY) ||
-                        (item.x2 > minX && item.x2 < maxX && item.y2 > minY && item.y2 < maxY)
-            } else if (item.type === 'text' || item.type === 'image') {
-              // 简化的文本和图片选择检测
-              isInside = item.x > minX && 
-                        item.x < maxX && 
-                        item.y > minY && 
-                        item.y < maxY
-            }
-            
-            if (isInside && !this.selectedItems.includes(item.id)) {
-              this.selectedItems.push(item.id)
-            }
-          })
-          
-          this.isSelecting = false
-          this.history.push(this.items)
+          this.finalizeSelection();
+          this.isSelecting = false;
         }
         
-        this.isDragging = false
+        this.isDragging = false;
       },
-      
+      finalizeSelection() {
+        const minX = Math.min(this.selectionStart.x, this.currentMousePos.x);
+        const maxX = Math.max(this.selectionStart.x, this.currentMousePos.x);
+        const minY = Math.min(this.selectionStart.y, this.currentMousePos.y);
+        const maxY = Math.max(this.selectionStart.y, this.currentMousePos.y);
+        
+        const newSelection = [];
+        
+        this.items.forEach(item => {
+          let isInside = false;
+          
+          if (item.type === 'rectangle') {
+            isInside = item.x < maxX && 
+                      item.x + item.width > minX && 
+                      item.y < maxY && 
+                      item.y + item.height > minY;
+          } else if (item.type === 'circle') {
+            // 更精确的圆选择检测
+            const closestX = Math.max(minX, Math.min(item.cx, maxX));
+            const closestY = Math.max(minY, Math.min(item.cy, maxY));
+            const distance = Math.sqrt(
+              Math.pow(item.cx - closestX, 2) + 
+              Math.pow(item.cy - closestY, 2)
+            );
+            isInside = distance <= item.r;
+          } else if (item.type === 'line') {
+            // 检查线段的起点或终点是否在选择框内
+            isInside = (item.x1 >= minX && item.x1 <= maxX && item.y1 >= minY && item.y1 <= maxY) ||
+                      (item.x2 >= minX && item.x2 <= maxX && item.y2 >= minY && item.y2 <= maxY);
+          } else {
+            // 文本和图片的简单检测
+            isInside = item.x >= minX && 
+                      item.x <= maxX && 
+                      item.y >= minY && 
+                      item.y <= maxY;
+          }
+          
+          if (isInside) {
+            newSelection.push(item.id);
+          }
+        });
+        
+        if (event.ctrlKey || event.metaKey) {
+          // 多选模式，合并选择
+          this.selectedItems = [...new Set([...this.selectedItems, ...newSelection])];
+        } else {
+          this.selectedItems = newSelection;
+        }
+      },
       // 项目鼠标事件
       handleItemMouseDown(event, item) {
-        if (this.mode !== 'edit') return
-        
-        const rect = this.$refs.canvasContainer.getBoundingClientRect()
-        const x = event.clientX - rect.left
-        const y = event.clientY - rect.top
-        
-        this.dragStartPos = { x, y }
-        this.isDragging = true
-        
-        this.selectItem(item.id, event.ctrlKey || event.metaKey)
-      },
-      
-      // 动画循环
-      animationLoop(timestamp) {
-        // 限制更新频率
-        if (timestamp - this.lastUpdateTime > 100) {
-          this.updateBindings()
-          this.lastUpdateTime = timestamp
+        console.log('MouseDown Event:', event.target, 'on item:', item.id);
+        if (this.mode !== 'edit') return;
+
+        const rect = this.$refs.canvasContainer.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+
+        // 初始化拖拽状态
+        this.dragState = {
+          active: true,
+          startX: mouseX,
+          startY: mouseY,
+          items: this.selectedItems.map(id => {
+            const target = this.items.find(i => i.id === id);
+            return target ? { ...target, origX: target.x, origY: target.y } : null;
+          }).filter(Boolean)
+        };
+
+        // 如果点击的是未选中的项目，单独选中它
+        if (!this.selectedItems.includes(item.id)) {
+          this.selectedItems = [item.id];
+          this.dragState.items = [{ ...item, origX: item.x, origY: item.y }];
         }
+
+        // 添加事件监听（使用 passive: false 确保 preventDefault 生效）
+        window.addEventListener('mousemove', this.handleRealDragMove, { passive: false });
+        window.addEventListener('mouseup', this.handleRealDragEnd);
+        event.preventDefault();
+      },
+      handleRealDragMove(event) {
+        // console.log('MouseMove:', event.clientX, event.clientY);
+        if (!this.dragState.active) return;
+
+        const rect = this.$refs.canvasContainer.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
         
-        this.animationFrame = requestAnimationFrame(this.animationLoop)
+        const deltaX = mouseX - this.dragState.startX;
+        const deltaY = mouseY - this.dragState.startY;
+
+        // 直接修改 items 数组（Vue.set 在数组更新时不需要）
+        this.items = this.items.map(item => {
+          const original = this.dragState.items.find(i => i.id === item.id);
+          if (!original) return item;
+
+          // 根据类型处理不同属性
+          const newItem = { ...item };
+          switch(item.type) {
+            case 'circle':
+              newItem.cx = original.cx + deltaX;
+              newItem.cy = original.cy + deltaY;
+              break;
+            case 'line':
+              newItem.x1 = original.x1 + deltaX;
+              newItem.y1 = original.y1 + deltaY;
+              newItem.x2 = original.x2 + deltaX;
+              newItem.y2 = original.y2 + deltaY;
+              break;
+            default: // rectangle/text/image
+              newItem.x = original.origX + deltaX;
+              newItem.y = original.origY + deltaY;
+          }
+          return newItem;
+        });
+
+        event.preventDefault();
+      },
+
+      handleRealDragEnd() {
+        if (this.dragState.active) {
+          // 保存到历史记录
+          this.history.push(JSON.parse(JSON.stringify(this.items)));
+          this.dragState.active = false;
+        }
+        window.removeEventListener('mousemove', this.handleRealDragMove);
+        window.removeEventListener('mouseup', this.handleRealDragEnd);
+      },    
+
+      controlledAnimationLoop(timestamp) {
+        if (!this.animationEnabled || this.mode !== 'run') {
+          this.animationFrame = requestAnimationFrame(this.controlledAnimationLoop);
+          return;
+        }
+
+        if (timestamp - this.lastUpdateTime > 100) {
+          this.updateBindings();
+          this.lastUpdateTime = timestamp;
+        }
+        this.animationFrame = requestAnimationFrame(this.controlledAnimationLoop);
       },
       
       // 更新绑定变量
@@ -588,7 +823,54 @@
           
           return updatedItem
         })
-      }
+      },
+      //只更新单个项目
+      updateSingleItem(updates) {
+        // 跳过动画循环期间的更新
+        if (this.isAnimating) return;
+        
+        // 深度合并更新
+        const index = this.items.findIndex(i => i.id === updates.id);
+        if (index === -1) return;
+        
+        // 保留绑定关系
+        const bindings = this.items[index].bindings || {};
+        
+        // 创建新对象确保响应性
+        const newItem = {
+          ...this.items[index],
+          ...updates,
+          bindings
+        };
+        
+        // 替换数组元素
+        this.items = [
+          ...this.items.slice(0, index),
+          newItem,
+          ...this.items.slice(index + 1)
+        ];
+      },
+      addImage(payload) {
+        console.log('接收到添加图片请求:', payload); // 调试
+        const newItem = {
+          id: payload.id,
+          type: 'image',
+          x: 100,
+          y: 100,
+          width: 100,
+          height: 100,
+          src: payload.src,
+          opacity: 1,
+          bindings: {}
+        };
+        console.log('图片添加111:', newItem);
+        // 确保响应性
+        this.items = [...this.items, newItem];
+        this.selectItem(newItem.id, false);
+        this.history.push(JSON.parse(JSON.stringify(this.items)));
+        
+        console.log('当前所有项目:', this.items); // 调试
+      },
     }
   }
   </script>
@@ -611,8 +893,25 @@
     flex: 1;
     overflow: auto;
     background-color: #f5f5f5;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    position: relative;
   }
-  
+  svg {
+    pointer-events: bounding-box;
+    display: block; /* 消除SVG默认的inline间隙 */
+    user-select: none;
+  }
+  svg * {
+    pointer-events: visible;
+  }
+  /* 所有图形元素响应指针事件 */
+  svg > g > * {
+    pointer-events: all;
+    cursor: move;
+  }
   .canvas {
     display: block;
     background-color: white;
@@ -622,5 +921,31 @@
   .selected {
     outline: 2px dashed #0078d7;
     outline-offset: 2px;
+    position: relative;
+    will-change: transform;
+    transition: none !important; /* 拖拽时禁用动画 */
+    cursor: move;
+  }
+  .selected::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: #0078d7;
+    right: -4px;
+    bottom: -4px;
+    cursor: nwse-resize;
+  }
+  /* 添加拖拽相关样式 */
+  .dragging {
+    cursor: grabbing !important;
+    opacity: 0.9;
+    z-index: 1000;
+    transition: none !important;
+    pointer-events: none;
+  }
+
+  .canvas-container {
+    user-select: none; /* 防止文本选中干扰拖拽 */
   }
   </style>

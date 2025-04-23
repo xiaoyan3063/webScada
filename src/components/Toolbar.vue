@@ -44,6 +44,7 @@
   </template>
   
   <script>
+  import { generateId } from '../utils/utils';  // 添加这行导入语句
   export default {
     props: {
       mode: {
@@ -58,11 +59,25 @@
       },
       
       handleImageFile(event) {
-        const file = event.target.files[0]
-        if (file) {
-          this.$emit('add-image', file)
-        }
-        event.target.value = '' // 重置input，允许重复选择同一文件
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        console.log('选择了文件:', file.name); // 调试
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          console.log('文件读取完成，准备发射事件'); // 调试
+          this.$emit('add-image', {
+            id: generateId(),
+            src: e.target.result,
+            type: 'image'
+          });
+        };
+        reader.onerror = (error) => {
+          console.error('图片加载失败:', error);
+        };
+        reader.readAsDataURL(file);
+        event.target.value = ''; // 重置input    
       },
       
       handleLoadClick() {
