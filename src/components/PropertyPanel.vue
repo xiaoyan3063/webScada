@@ -1,126 +1,270 @@
 <template>
     <div class="property-panel">
-      <div class="panel-header">属性</div>      
-      <div class="panel-content" v-if="selectedItem">
-        <button 
-            v-if="selectedItem" 
-            @click="deleteSelected"
-            class="delete-button"
-        >
-        删除选中组件
-        </button>
-        <div class="property-group">
-          <div class="group-title">基本属性</div>
-          <div class="property-item">
-            <label>X坐标</label>
-            <input type="number" v-model.number="selectedItem.x" @change="updateItem">
-          </div>
-          <div class="property-item">
-            <label>Y坐标</label>
-            <input type="number" v-model.number="selectedItem.y" @change="updateItem">
-          </div>
-          <div class="property-item">
-            <label>宽度</label>
-            <input type="number" v-model.number="selectedItem.width" @change="updateItem">
-          </div>
-          <div class="property-item">
-            <label>高度</label>
-            <input type="number" v-model.number="selectedItem.height" @change="updateItem">
-          </div>
-          <div class="property-item">
-            <label>旋转</label>
-            <input type="number" v-model.number="selectedItem.rotation" @change="updateItem">
-          </div>
-        </div>
-        <div v-if="selectedItem && selectedItem.type === 'ScadaImage'">
-            <h3>图片属性</h3>
-            <div class="property-group">
-                <label>图片源</label>
-                <input v-model="selectedItem.src" @change="updateItem">
-            </div>
-            <div class="property-group">
-                <label>保持宽高比</label>
-                <input type="checkbox" v-model="selectedItem.keepAspectRatio" @change="updateItem">
-            </div>
-        </div>
-        <div class="property-group" v-else-if="selectedItem.type === 'text'">
-          <div class="group-title">文本属性</div>
-          <div class="property-item">
-            <label>文本内容</label>
-            <input type="text" v-model="selectedItem.text" @change="updateItem">
-          </div>
-          <div class="property-item">
-            <label>字体大小</label>
-            <input type="number" v-model.number="selectedItem.fontSize" @change="updateItem">
-          </div>
-          <div class="property-item">
-            <label>字体颜色</label>
-            <input type="color" v-model="selectedItem.fontColor" @change="updateItem">
-          </div>
-        </div> 
-        <div class="property-group" v-else>
-          <div class="group-title">填充与边框</div>
-          <div class="property-item">
-            <label>填充颜色</label>
-            <input type="color" v-model="selectedItem.fill" @change="updateItem">
-          </div>
-          <div class="property-item">
-            <label>边框颜色</label>
-            <input type="color" v-model="selectedItem.stroke" @change="updateItem">
-          </div>
-          <div class="property-item">
-            <label>边框宽度</label>
-            <input type="number" v-model.number="selectedItem.strokeWidth" @change="updateItem">
-          </div>
-        </div>  
+      <h3>属性面板</h3>
+      
+      <div v-for="item in selectedItemsData" :key="item.id" class="item-properties">
+        <h4>{{ item.type }} (ID: {{ item.id }})</h4>
         
         <div class="property-group">
-          <div class="group-title">动画设置</div>
-          <button @click="openAnimationConfig">添加动画</button>
-          <div v-for="anim in itemAnimations" :key="anim.id" class="animation-item">
-            {{ anim.type }} - {{ anim.property }}
-            <button @click="removeAnimation(anim.id)">删除</button>
+          <label>位置 X:</label>
+          <input 
+            type="number" 
+            v-model.number="item.x" 
+            @change="updateSelectedItems({ x: item.x })"
+            v-if="hasProperty(item, 'x')"
+          >
+        </div>
+        
+        <div class="property-group">
+          <label>位置 Y:</label>
+          <input 
+            type="number" 
+            v-model.number="item.y" 
+            @change="updateSelectedItems({ y: item.y })"
+            v-if="hasProperty(item, 'y')"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'rectangle'">
+          <label>宽度:</label>
+          <input 
+            type="number" 
+            v-model.number="item.width" 
+            @change="updateSelectedItems({ width: item.width })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'rectangle'">
+          <label>高度:</label>
+          <input 
+            type="number" 
+            v-model.number="item.height" 
+            @change="updateSelectedItems({ height: item.height })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'circle'">
+          <label>半径:</label>
+          <input 
+            type="number" 
+            v-model.number="item.r" 
+            @change="updateSelectedItems({ r: item.r })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'line'">
+          <label>X1:</label>
+          <input 
+            type="number" 
+            v-model.number="item.x1" 
+            @change="updateSelectedItems({ x1: item.x1 })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'line'">
+          <label>Y1:</label>
+          <input 
+            type="number" 
+            v-model.number="item.y1" 
+            @change="updateSelectedItems({ y1: item.y1 })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'line'">
+          <label>X2:</label>
+          <input 
+            type="number" 
+            v-model.number="item.x2" 
+            @change="updateSelectedItems({ x2: item.x2 })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'line'">
+          <label>Y2:</label>
+          <input 
+            type="number" 
+            v-model.number="item.y2" 
+            @change="updateSelectedItems({ y2: item.y2 })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'text'">
+          <label>内容:</label>
+          <input 
+            type="text" 
+            v-model="item.content" 
+            @change="updateSelectedItems({ content: item.content })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'text'">
+          <label>字体大小:</label>
+          <input 
+            type="number" 
+            v-model.number="item.fontSize" 
+            @change="updateSelectedItems({ fontSize: item.fontSize })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'image'">
+          <label>宽度:</label>
+          <input 
+            type="number" 
+            v-model.number="item.width" 
+            @change="updateSelectedItems({ width: item.width })"
+          >
+        </div>
+        
+        <div class="property-group" v-if="item.type === 'image'">
+          <label>高度:</label>
+          <input 
+            type="number" 
+            v-model.number="item.height" 
+            @change="updateSelectedItems({ height: item.height })"
+          >
+        </div>
+        
+        <div class="property-group">
+          <label>填充颜色:</label>
+          <input 
+            type="color" 
+            v-model="item.fill" 
+            @change="updateSelectedItems({ fill: item.fill })"
+            v-if="hasProperty(item, 'fill')"
+          >
+        </div>
+        
+        <div class="property-group">
+          <label>边框颜色:</label>
+          <input 
+            type="color" 
+            v-model="item.stroke" 
+            @change="updateSelectedItems({ stroke: item.stroke })"
+            v-if="hasProperty(item, 'stroke')"
+          >
+        </div>
+        
+        <div class="property-group">
+          <label>边框宽度:</label>
+          <input 
+            type="number" 
+            v-model.number="item.strokeWidth" 
+            @change="updateSelectedItems({ strokeWidth: item.strokeWidth })"
+            v-if="hasProperty(item, 'strokeWidth')"
+          >
+        </div>
+        
+        <div class="property-group">
+          <label>透明度:</label>
+          <input 
+            type="range" 
+            v-model.number="item.opacity" 
+            min="0" 
+            max="1" 
+            step="0.1"
+            @change="updateSelectedItems({ opacity: item.opacity })"
+          >
+          <span>{{ item.opacity }}</span>
+        </div>
+        
+        <div class="property-group" v-if="hasProperty(item, 'rotation')">
+          <label>旋转角度:</label>
+          <input 
+            type="number" 
+            v-model.number="item.rotation" 
+            @change="updateSelectedItems({ rotation: item.rotation })"
+          >
+        </div>
+        
+        <div class="binding-section" v-if="selectedItems.length === 1">
+          <h4>变量绑定</h4>
+          
+          <div class="binding-group" v-for="prop in bindableProperties(item)" :key="prop">
+            <label>{{ prop }}:</label>
+            <select v-model="item.bindings[prop].variableId" @change="updateBinding(item.id, prop)">
+              <option value="">无</option>
+              <option v-for="variable in variables" :key="variable.id" :value="variable.id">
+                {{ variable.name }} (当前值: {{ variable.value }})
+              </option>
+            </select>
+            
+            <div v-if="item.bindings[prop]" class="transform-fn">
+              <label>转换函数 (value, min, max):</label>
+              <input 
+                type="text" 
+                v-model="item.bindings[prop].transformFn" 
+                placeholder="例如: value * 2"
+                @change="updateBinding(item.id, prop)"
+              >
+            </div>
           </div>
         </div>
-      </div>
-      <div class="panel-empty" v-else>
-        请选择一个对象
       </div>
     </div>
   </template>
   
   <script>
-  import { mapState, mapActions } from 'vuex'
-  
   export default {
-    computed: {
-      ...mapState('editor', {
-        selectedItemId: state => state.selectedItemId,
-        canvasItems: state => state.canvasItems
-      }),
-      ...mapState('animation', {
-        animations: state => state.animations
-      }),
-      
-      selectedItem() {
-        if (!this.selectedItemId) return null
-        return this.canvasItems.find(item => item.id === this.selectedItemId)
+    props: {
+      items: {
+        type: Array,
+        required: true
       },
-      
-      itemAnimations() {
-        if (!this.selectedItemId) return []
-        return this.animations.filter(anim => anim.itemId === this.selectedItemId)
+      selectedItems: {
+        type: Array,
+        required: true
+      },
+      variables: {
+        type: Array,
+        required: true
       }
     },
+    
+    computed: {
+      selectedItemsData() {
+        return this.items.filter(item => this.selectedItems.includes(item.id))
+      }
+    },
+    
     methods: {
-      ...mapActions('editor', ['updateItem']),
-      ...mapActions('animation', ['removeAnimation']),
-      
-      openAnimationConfig() {
-        this.$emit('open-animation-config', this.selectedItemId)
+      hasProperty(item, prop) {
+        return prop in item
       },
-      deleteSelected() {
-        this.$store.dispatch('editor/deleteSelectedItem')
+      
+      bindableProperties(item) {
+        // 返回可以绑定变量的属性列表
+        const commonProps = ['fill', 'stroke', 'opacity', 'rotation']
+        const typeSpecificProps = {
+          rectangle: ['width', 'height', 'x', 'y'],
+          circle: ['r', 'cx', 'cy'],
+          line: ['x1', 'y1', 'x2', 'y2'],
+          text: ['content', 'fontSize', 'x', 'y'],
+          image: ['width', 'height', 'x', 'y']
+        }
+        
+        return [...commonProps, ...(typeSpecificProps[item.type] || [])].filter(prop => this.hasProperty(item, prop))
+      },
+      
+      updateSelectedItems(updates) {
+        this.$emit('update-item', updates)
+      },
+      
+      updateBinding(itemId, property) {
+        const item = this.selectedItemsData.find(i => i.id === itemId)
+        if (!item) return
+        
+        const variableId = item.bindings[property]?.variableId
+        const transformFn = item.bindings[property]?.transformFn
+        
+        if (variableId) {
+          this.$emit('bind-variable', itemId, property, variableId, transformFn)
+        } else {
+          // 移除绑定
+          if (item.bindings && item.bindings[property]) {
+            delete item.bindings[property]
+            this.$emit('update-item', {}) // 触发更新
+          }
+        }
       }
     }
   }
@@ -129,83 +273,69 @@
   <style scoped>
   .property-panel {
     width: 300px;
+    padding: 10px;
     background: #f5f5f5;
     border-left: 1px solid #ddd;
-    height: 100%;
     overflow-y: auto;
   }
   
-  .panel-header {
-    padding: 10px;
-    font-weight: bold;
+  .item-properties {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
     border-bottom: 1px solid #ddd;
   }
   
-  .panel-content {
-    padding: 10px;
-  }
-  
-  .panel-empty {
-    padding: 20px;
-    text-align: center;
-    color: #999;
-  }
-  
   .property-group {
-    margin-bottom: 20px;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 10px;
-  }
-  
-  .group-title {
-    font-weight: bold;
     margin-bottom: 10px;
-    color: #555;
-  }
-  
-  .property-item {
-    margin-bottom: 10px;
-  }
-  
-  .property-item label {
-    display: block;
-    margin-bottom: 5px;
-    font-size: 12px;
-    color: #666;
-  }
-  
-  .property-item input {
-    width: 100%;
-    padding: 5px;
-    border: 1px solid #ddd;
-    border-radius: 3px;
-  }
-  
-  .animation-item {
-    padding: 5px;
-    margin: 5px 0;
-    background: #eee;
-    font-size: 12px;
     display: flex;
-    justify-content: space-between;
+    align-items: center;
   }
   
-  .animation-item button {
+  .property-group label {
+    width: 80px;
+    margin-right: 10px;
     font-size: 12px;
+  }
+  
+  .property-group input[type="number"],
+  .property-group input[type="text"] {
+    width: 60px;
     padding: 2px 5px;
   }
-  .delete-button {
-    background-color: #ff5252;
-    color: white;
-    padding: 8px 12px;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-bottom: 15px;
-    width: 100%;
+  
+  .property-group input[type="range"] {
+    flex: 1;
+    margin-right: 5px;
   }
-
-    .delete-button:hover {
-        background-color: #ff1744;
-    }
+  
+  .binding-section {
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 1px solid #ddd;
+  }
+  
+  .binding-group {
+    margin-bottom: 10px;
+  }
+  
+  .binding-group label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 2px;
+  }
+  
+  .binding-group select {
+    width: 100%;
+    padding: 3px;
+  }
+  
+  .transform-fn {
+    margin-top: 5px;
+  }
+  
+  .transform-fn input {
+    width: 100%;
+    padding: 3px;
+    font-size: 12px;
+  }
   </style>

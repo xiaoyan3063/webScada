@@ -14,15 +14,16 @@ module.exports = {
             })
             .end();
 
-        // 图片处理优化配置（新增）
+        // 修正后的图片处理优化配置
         config.module
             .rule('images')
             .test(/\.(png|jpe?g|gif|svg)(\?.*)?$/)
             .use('url-loader')
             .loader('url-loader')
-            .tap(options => {
-                options.limit = 0; // 禁用 base64 内联
-                return options;
+            .options({
+                limit: 0, // 禁用 base64 内联
+                name: 'assets/images/[name].[hash:8].[ext]',
+                esModule: false
             })
             .end();
     },
@@ -32,11 +33,9 @@ module.exports = {
             alias: {
                 joint: path.resolve(__dirname, 'node_modules/jointjs/dist/joint.js'),
                 '@': path.resolve(__dirname, 'src'),
-                // 新增图片路径别名（可选）
                 '@images': path.resolve(__dirname, 'public/images')
             }
-        },
-        // 其他 webpack 配置...
+        }
     },
 
     // 开发服务器配置（可选）
