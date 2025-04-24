@@ -22,6 +22,7 @@
           @update-variable="updateVariable"
           @delete-variable="deleteVariable"
           @fetch-variables="fetchVariables"
+          style="user-select: none;"
         />
         
         <div 
@@ -30,6 +31,7 @@
           @mousedown="handleCanvasMouseDown"
           @mousemove="handleCanvasMouseMove"
           @mouseup="handleCanvasMouseUp"
+          style="user-select: none;"
         >
           <svg class="canvas" :width="canvasWidth" :height="canvasHeight" pointer-events="bounding-box">
             <!-- 网格背景 -->
@@ -182,6 +184,7 @@
           :variables="variables"
           @update-item="updateSingleItem"
           @bind-variable="bindVariable"
+          style="user-select: none;"
         />
       </div>
     </div>
@@ -237,6 +240,15 @@
         resizeItem: null,
         resizeType: null, // 'bottom-right', 'radius' 等
         initialItemState1: null,
+        keyPressState: {
+          arrowUp: false,
+          arrowDown: false,
+          arrowLeft: false,
+          arrowRight: false,
+          shiftKey: false
+        },
+        moveStep: 1, // 默认移动步长
+        keyPressTimer: null
       }
     },
     computed: {
@@ -263,6 +275,7 @@
     mounted() {
       // 添加键盘事件监听
       window.addEventListener('keydown', this.handleKeyDown);
+      window.addEventListener('keyup', this.handleKeyUp);
     },
     
     beforeDestroy() {
@@ -274,46 +287,140 @@
       window.removeEventListener('mouseup', this.handleRealDragEnd);
       // 移除键盘事件监听
       window.removeEventListener('keydown', this.handleKeyDown);
+      window.removeEventListener('keyup', this.handleKeyUp);
+      this.stopContinuousMove();
     },
     
     methods: {
       // 键盘事件处理
       handleKeyDown(event) {
-        // 只在编辑模式下处理键盘事件
         if (this.mode !== 'edit') return;
-        
-        // 检查是否按下了Ctrl/Cmd键
+      
         const ctrlKey = event.ctrlKey || event.metaKey;
         
         // 处理组合键
         if (ctrlKey) {
           switch (event.key.toLowerCase()) {
-            case 'a':
-              event.preventDefault();
-              this.selectAll();
-              break;
-            case 'c':
-              event.preventDefault();
-              this.copySelected();
-              break;
-            case 'v':
-              event.preventDefault();
-              this.pasteItems();
-              break;
-            case 's':
-              event.preventDefault();
-              this.saveCanvas();
-              break;
+            case 'a': this.selectAll(); break;
+            case 'c': this.copySelected(); break;
+            case 'v': this.pasteItems(); break;
+            case 's': this.saveCanvas(); break;
           }
+          return;
         }
         
         // 处理删除键
         if (event.key === 'Delete') {
-          event.preventDefault();
           this.deleteSelected();
+          return;
+        }
+        
+        // 处理方向键
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Shift'].includes(event.key)) {
+          event.preventDefault();
+          
+          // 更新按键状态
+          this.keyPressState.shiftKey = event.shiftKey;
+          this.moveStep = event.shiftKey ? 10 : 1; // Shift加速
+          
+          switch(event.key) {
+            case 'ArrowUp': this.keyPressState.arrowUp = true; break;
+            case 'ArrowDown': this.keyPressState.arrowDown = true; break;
+            case 'ArrowLeft': this.keyPressState.arrowLeft = true; break;
+            case 'ArrowRight': this.keyPressState.arrowRight = true; break;
+          }
+          
+          // 开始连续移动
+          this.startContinuousMove();
+        }
+      },
+      handleKeyUp(event) {
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Shift'].includes(event.key)) {
+          event.preventDefault();
+          
+          // 更新按键状态
+          switch(event.key) {
+            case 'ArrowUp': this.keyPressState.arrowUp = false; break;
+            case 'ArrowDown': this.keyPressState.arrowDown = false; break;
+            case 'ArrowLeft': this.keyPressState.arrowLeft = false; break;
+            case 'ArrowRight': this.keyPressState.arrowRight = false; break;
+            case 'Shift': 
+              this.keyPressState.shiftKey = false;
+              this.moveStep = 1;
+              break;
+          }
+          
+          // 如果没有方向键按下，停止连续移动
+          if (!this.keyPressState.arrowUp && !this.keyPressState.arrowDown && 
+              !this.keyPressState.arrowLeft && !this.keyPressState.arrowRight) {
+            this.stopContinuousMove();
+          }
         }
       },
       
+      startContinuousMove() {
+        // 如果已经有定时器在运行，则不再创建新的
+        if (this.keyPressTimer) return;
+        
+        // 初始移动
+        this.moveSelectedItems();
+        
+        // 设置定时器连续移动
+        this.keyPressTimer = setInterval(() => {
+          this.moveSelectedItems();
+        }, 50); // 50毫秒间隔
+      },
+      
+      stopContinuousMove() {
+        if (this.keyPressTimer) {
+          clearInterval(this.keyPressTimer);
+          this.keyPressTimer = null;
+        }
+        
+        // 将移动操作添加到历史记录
+        if (this.selectedItems.length > 0) {
+          this.history.push(JSON.parse(JSON.stringify(this.items)));
+        }
+      },
+      
+      moveSelectedItems() {
+        if (this.selectedItems.length === 0) return;
+        
+        // 计算移动距离
+        let dx = 0, dy = 0;
+        
+        if (this.keyPressState.arrowUp) dy -= this.moveStep;
+        if (this.keyPressState.arrowDown) dy += this.moveStep;
+        if (this.keyPressState.arrowLeft) dx -= this.moveStep;
+        if (this.keyPressState.arrowRight) dx += this.moveStep;
+        
+        if (dx === 0 && dy === 0) return;
+        
+        // 移动选中的项目
+        this.items = this.items.map(item => {
+          if (!this.selectedItems.includes(item.id)) return item;
+          
+          const newItem = {...item};
+          
+          switch(item.type) {
+            case 'circle':
+              newItem.cx += dx;
+              newItem.cy += dy;
+              break;
+            case 'line':
+              newItem.x1 += dx;
+              newItem.y1 += dy;
+              newItem.x2 += dx;
+              newItem.y2 += dy;
+              break;
+            default: // rectangle, text, image
+              newItem.x += dx;
+              newItem.y += dy;
+          }
+          
+          return newItem;
+        });
+      },
       // 复制选中的项目
       copySelected() {
         if (this.selectedItems.length === 0) return;
@@ -513,7 +620,24 @@
       selectAll() {
         if (this.mode !== 'edit') return
         
-        this.selectedItems = this.items.map(item => item.id)
+        // 更严格的选择过滤
+        this.selectedItems = this.items
+          .filter(item => {
+            const validTypes = ['rectangle', 'circle', 'line', 'text', 'image'];
+            return validTypes.includes(item.type);
+          })
+          .map(item => item.id);
+        
+        // 添加视觉反馈
+        this.$nextTick(() => {
+          this.$refs.canvasContainer.querySelectorAll('.selected')
+            .forEach(el => el.classList.add('select-feedback'));
+          
+          setTimeout(() => {
+            this.$refs.canvasContainer.querySelectorAll('.select-feedback')
+              .forEach(el => el.classList.remove('select-feedback'));
+          }, 300);
+        });
       },
       
       // 反选
@@ -1118,5 +1242,30 @@
 
   .pasted-item {
     animation: pasteAnimation 0.3s ease-out;
+  }
+  /* 添加移动时的视觉反馈 */
+  .moving {
+    opacity: 0.9;
+    transition: none; /* 移动时禁用过渡效果 */
+  }
+
+  /* 添加快捷键提示样式 */
+  .shortcut-hint {
+    margin-left: 10px;
+    font-size: 12px;
+    color: #666;
+    padding: 4px 8px;
+    background: #f0f0f0;
+    border-radius: 4px;
+  }
+  /* 选中反馈动画 */
+  @keyframes selectFlash {
+    0% { opacity: 0.5; }
+    50% { opacity: 0.8; }
+    100% { opacity: 1; }
+  }
+
+  .select-feedback {
+    animation: selectFlash 0.3s ease;
   }
   </style>
