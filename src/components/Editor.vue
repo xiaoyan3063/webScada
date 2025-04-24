@@ -260,6 +260,10 @@
       // 初始化拖拽状态
       this.dragState = null;
     },
+    mounted() {
+      // 添加键盘事件监听
+      window.addEventListener('keydown', this.handleKeyDown);
+    },
     
     beforeDestroy() {
       if (this.animationFrame) {
@@ -268,9 +272,122 @@
       // 确保移除所有事件监听
       window.removeEventListener('mousemove', this.handleRealDragMove);
       window.removeEventListener('mouseup', this.handleRealDragEnd);
+      // 移除键盘事件监听
+      window.removeEventListener('keydown', this.handleKeyDown);
     },
     
     methods: {
+      // 键盘事件处理
+      handleKeyDown(event) {
+        // 只在编辑模式下处理键盘事件
+        if (this.mode !== 'edit') return;
+        
+        // 检查是否按下了Ctrl/Cmd键
+        const ctrlKey = event.ctrlKey || event.metaKey;
+        
+        // 处理组合键
+        if (ctrlKey) {
+          switch (event.key.toLowerCase()) {
+            case 'a':
+              event.preventDefault();
+              this.selectAll();
+              break;
+            case 'c':
+              event.preventDefault();
+              this.copySelected();
+              break;
+            case 'v':
+              event.preventDefault();
+              this.pasteItems();
+              break;
+            case 's':
+              event.preventDefault();
+              this.saveCanvas();
+              break;
+          }
+        }
+        
+        // 处理删除键
+        if (event.key === 'Delete') {
+          event.preventDefault();
+          this.deleteSelected();
+        }
+      },
+      
+      // 复制选中的项目
+      copySelected() {
+        if (this.selectedItems.length === 0) return;
+        
+        // 复制选中的项目到剪贴板
+        const itemsToCopy = this.items.filter(item => 
+          this.selectedItems.includes(item.id)
+        );
+        
+        // 为复制的项目生成新的ID
+        const idMap = {};
+        const copiedItems = itemsToCopy.map(item => {
+          const newId = generateId();
+          idMap[item.id] = newId;
+          
+          // 创建新项目，替换ID
+          return { ...item, id: newId };
+        });
+        
+        // 存储到剪贴板
+        this.$clipboard = {
+          items: copiedItems,
+          idMap,
+          originalIds: itemsToCopy.map(item => item.id)
+        };
+        
+        console.log('已复制', copiedItems.length, '个项目');
+      },
+      
+      // 粘贴项目
+      pasteItems() {
+        if (!this.$clipboard || !this.$clipboard.items) return;
+        
+        // 计算粘贴位置偏移量（向右下方偏移20px）
+        const offset = 20;
+        
+        // 粘贴项目并添加到画布
+        const pastedItems = this.$clipboard.items.map(item => {
+          const newItem = { ...item };
+          
+          // 根据类型调整位置
+          switch (newItem.type) {
+            case 'rectangle':
+            case 'text':
+            case 'image':
+              newItem.x += offset;
+              newItem.y += offset;
+              break;
+            case 'circle':
+              newItem.cx += offset;
+              newItem.cy += offset;
+              break;
+            case 'line':
+              newItem.x1 += offset;
+              newItem.y1 += offset;
+              newItem.x2 += offset;
+              newItem.y2 += offset;
+              break;
+          }
+          
+          return newItem;
+        });
+        
+        // 添加到画布
+        this.items = [...this.items, ...pastedItems];
+        
+        // 选中粘贴的项目
+        this.selectedItems = pastedItems.map(item => item.id);
+        
+        // 添加到历史记录
+        this.history.push(JSON.parse(JSON.stringify(this.items)));
+        
+        console.log('已粘贴', pastedItems.length, '个项目');
+      },
       // 模式切换
       changeMode(mode) {
         this.mode = mode;
@@ -986,5 +1103,20 @@
   .resize-handle {
     cursor: nwse-resize;
     pointer-events: all;
+  }
+  /* 添加操作反馈样式 */
+  .operating {
+    opacity: 0.8;
+    transition: opacity 0.2s;
+  }
+
+  /* 复制粘贴时的动画 */
+  @keyframes pasteAnimation {
+    0% { opacity: 0.5; transform: scale(0.95); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  .pasted-item {
+    animation: pasteAnimation 0.3s ease-out;
   }
   </style>

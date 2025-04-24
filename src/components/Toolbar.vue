@@ -4,6 +4,7 @@
         <button @click="$emit('change-mode', mode === 'edit' ? 'run' : 'edit')">
           {{ mode === 'edit' ? '运行模式' : '编辑模式' }}
         </button>
+        <span class="shortcut-hint">快捷键: Ctrl+A全选, Delete删除, Ctrl+C/V复制粘贴, Ctrl+S保存</span>
       </div>
       
       <div class="toolbar-group" v-if="mode === 'edit'">
@@ -112,5 +113,13 @@
   
   .toolbar-group button:hover {
     background: #e6e6e6;
+  }
+  .shortcut-hint {
+    margin-left: 10px;
+    font-size: 12px;
+    color: #666;
+    padding: 4px 8px;
+    background: #f0f0f0;
+    border-radius: 4px;
   }
   </style>
