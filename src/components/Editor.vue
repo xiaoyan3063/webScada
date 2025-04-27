@@ -279,6 +279,7 @@
     },
     
     beforeDestroy() {
+      this.clearDragState();
       if (this.animationFrame) {
         cancelAnimationFrame(this.animationFrame)
       }
@@ -292,6 +293,18 @@
     },
     
     methods: {
+      clearDragState() {
+        if (this.dragState.active) {
+          window.removeEventListener('mousemove', this.handleRealDragMove);
+          window.removeEventListener('mouseup', this.handleRealDragEnd);
+        }
+        this.dragState = {
+          active: false,
+          startX: 0,
+          startY: 0,
+          items: []
+        };
+      },
       // 键盘事件处理
       handleKeyDown(event) {
         if (this.mode !== 'edit') return;
@@ -769,8 +782,15 @@
             (event.target.tagName === 'rect' && event.target.getAttribute('fill') === 'url(#grid)')) {
           this.isSelecting = true;
           this.selectionStart = { x, y };
+          
+          // 如果没有按住Ctrl键，清空当前选择
           if (!event.ctrlKey && !event.metaKey) {
             this.selectedItems = [];
+          }
+          
+          // 如果是多选状态，准备拖拽所有已选中的项目
+          if (this.selectedItems.length > 0) {
+            this.prepareDrag(x, y);
           }
         }
       },
@@ -976,45 +996,54 @@
       },
       // 项目鼠标事件
       handleItemMouseDown(event, item) {
-        if (this.mode !== 'edit' || this.isResizing) return;
+        if (this.mode !== 'edit') return;
+
+        const rect = this.$refs.canvasContainer.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
 
         // 检查是否按下了Ctrl键（Mac上是metaKey）
         const isCtrlPressed = event.ctrlKey || event.metaKey;
         
         if (isCtrlPressed) {
-          // Ctrl+点击：切换选中状态（多选/反选）
+          // Ctrl+点击：只切换选中状态，不初始化拖拽
           this.toggleItemSelection(item.id);
-        } else {
-          // 普通点击：单选该对象
+          event.preventDefault();
+          return;
+        }
+
+        // 检查当前点击的项目是否已被选中
+        const isAlreadySelected = this.selectedItems.includes(item.id);
+        
+        if (!isAlreadySelected) {
+          // 如果点击了未选中的项目，且没有按Ctrl键，则单选该项目
           this.selectItem(item.id, false);
-          // 准备拖拽逻辑
-          const rect = this.$refs.canvasContainer.getBoundingClientRect();
-          const mouseX = event.clientX - rect.left;
-          const mouseY = event.clientY - rect.top;
+        }
 
-          // 初始化拖拽状态
-          this.dragState = {
-            active: true,
-            startX: mouseX,
-            startY: mouseY,
-            items: this.selectedItems.map(id => {
-              const target = this.items.find(i => i.id === id);
-              return target ? { ...target, origX: target.x, origY: target.y } : null;
-            }).filter(Boolean)
-          };
-
-          // 如果点击的是未选中的项目，单独选中它
-          if (!this.selectedItems.includes(item.id)) {
-            this.selectedItems = [item.id];
-            this.dragState.items = [{ ...item, origX: item.x, origY: item.y }];
-          }
-
-          // 添加事件监听（使用 passive: false 确保 preventDefault 生效）
-          window.addEventListener('mousemove', this.handleRealDragMove, { passive: false });
-          window.addEventListener('mouseup', this.handleRealDragEnd);
-        }       
+        // 准备拖拽所有选中项目（包括刚刚点击的项目）
+        this.prepareDrag(mouseX, mouseY);
         
         event.preventDefault();
+      },
+      
+      // 新增方法：准备拖拽所有选中项目
+      prepareDrag(startX, startY) {
+        this.dragState = {
+          active: true,
+          startX,
+          startY,
+          items: this.items
+            .filter(item => this.selectedItems.includes(item.id))
+            .map(item => ({
+              ...item,
+              origX: item.type === 'circle' ? item.cx : item.x,
+              origY: item.type === 'circle' ? item.cy : item.y
+            }))
+        };
+        
+        // 添加全局事件监听
+        window.addEventListener('mousemove', this.handleRealDragMove);
+        window.addEventListener('mouseup', this.handleRealDragEnd);
       },
       // 新增方法：切换项目选中状态
       toggleItemSelection(itemId) {
@@ -1037,17 +1066,16 @@
         const deltaX = mouseX - this.dragState.startX;
         const deltaY = mouseY - this.dragState.startY;
 
-        // 直接修改 items 数组（Vue.set 在数组更新时不需要）
+        // 移动所有拖拽状态中的项目
         this.items = this.items.map(item => {
           const original = this.dragState.items.find(i => i.id === item.id);
           if (!original) return item;
 
-          // 根据类型处理不同属性
           const newItem = { ...item };
           switch(item.type) {
             case 'circle':
-              newItem.cx = original.cx + deltaX;
-              newItem.cy = original.cy + deltaY;
+              newItem.cx = original.origX + deltaX;
+              newItem.cy = original.origY + deltaY;
               break;
             case 'line':
               newItem.x1 = original.x1 + deltaX;
