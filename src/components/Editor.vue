@@ -976,34 +976,55 @@
       },
       // 项目鼠标事件
       handleItemMouseDown(event, item) {
-        console.log('MouseDown Event:', event.target, 'on item:', item.id);
         if (this.mode !== 'edit' || this.isResizing) return;
 
-        const rect = this.$refs.canvasContainer.getBoundingClientRect();
-        const mouseX = event.clientX - rect.left;
-        const mouseY = event.clientY - rect.top;
+        // 检查是否按下了Ctrl键（Mac上是metaKey）
+        const isCtrlPressed = event.ctrlKey || event.metaKey;
+        
+        if (isCtrlPressed) {
+          // Ctrl+点击：切换选中状态（多选/反选）
+          this.toggleItemSelection(item.id);
+        } else {
+          // 普通点击：单选该对象
+          this.selectItem(item.id, false);
+          // 准备拖拽逻辑
+          const rect = this.$refs.canvasContainer.getBoundingClientRect();
+          const mouseX = event.clientX - rect.left;
+          const mouseY = event.clientY - rect.top;
 
-        // 初始化拖拽状态
-        this.dragState = {
-          active: true,
-          startX: mouseX,
-          startY: mouseY,
-          items: this.selectedItems.map(id => {
-            const target = this.items.find(i => i.id === id);
-            return target ? { ...target, origX: target.x, origY: target.y } : null;
-          }).filter(Boolean)
-        };
+          // 初始化拖拽状态
+          this.dragState = {
+            active: true,
+            startX: mouseX,
+            startY: mouseY,
+            items: this.selectedItems.map(id => {
+              const target = this.items.find(i => i.id === id);
+              return target ? { ...target, origX: target.x, origY: target.y } : null;
+            }).filter(Boolean)
+          };
 
-        // 如果点击的是未选中的项目，单独选中它
-        if (!this.selectedItems.includes(item.id)) {
-          this.selectedItems = [item.id];
-          this.dragState.items = [{ ...item, origX: item.x, origY: item.y }];
-        }
+          // 如果点击的是未选中的项目，单独选中它
+          if (!this.selectedItems.includes(item.id)) {
+            this.selectedItems = [item.id];
+            this.dragState.items = [{ ...item, origX: item.x, origY: item.y }];
+          }
 
-        // 添加事件监听（使用 passive: false 确保 preventDefault 生效）
-        window.addEventListener('mousemove', this.handleRealDragMove, { passive: false });
-        window.addEventListener('mouseup', this.handleRealDragEnd);
+          // 添加事件监听（使用 passive: false 确保 preventDefault 生效）
+          window.addEventListener('mousemove', this.handleRealDragMove, { passive: false });
+          window.addEventListener('mouseup', this.handleRealDragEnd);
+        }       
+        
         event.preventDefault();
+      },
+      // 新增方法：切换项目选中状态
+      toggleItemSelection(itemId) {
+        if (this.selectedItems.includes(itemId)) {
+          // 如果已选中，则从选中列表中移除（反选）
+          this.selectedItems = this.selectedItems.filter(id => id !== itemId);
+        } else {
+          // 如果未选中，则添加到选中列表（多选）
+          this.selectedItems = [...this.selectedItems, itemId];
+        }
       },
       handleRealDragMove(event) {
         // console.log('MouseMove:', event.clientX, event.clientY);
@@ -1267,5 +1288,15 @@
 
   .select-feedback {
     animation: selectFlash 0.3s ease;
+  }
+  /* 被反选的项目临时效果 */
+  .deselecting {
+    animation: pulse 0.3s ease;
+  }
+
+  @keyframes pulse {
+    0% { opacity: 0.7; }
+    50% { opacity: 0.4; }
+    100% { opacity: 1; }
   }
   </style>
